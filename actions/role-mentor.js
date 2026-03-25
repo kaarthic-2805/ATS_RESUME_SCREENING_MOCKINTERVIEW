@@ -2,10 +2,11 @@
 
 import { db } from "@/lib/prisma";
 import { currentUser } from "@clerk/nextjs/server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import Groq from "groq-sdk";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+const groq = new Groq({
+  apiKey: process.env.GROQ_API_KEY,
+});
 
 // Debug function
 const debugDB = (message, data) => {
@@ -21,73 +22,98 @@ export async function createRoleMentor(role) {
       throw new Error("User not authenticated");
     }
 
-    debugDB("Current user", user);
-
-    // Debug Prisma instance
-    if (process.env.NODE_ENV === "development") {
-      console.log("Prisma DB instance:", !!db);
-    }
-
     const dbUser = await db.user.findUnique({
       where: { clerkUserId: user.id },
     });
-
-    debugDB("Found DB user", dbUser);
 
     if (!dbUser) {
       throw new Error("User not found in database");
     }
 
-    // Generate learning path using AI
     const prompt = `
-      Create a detailed 30-day learning path for becoming a ${role}. 
-      Return the response in the following JSON format:
-      {
-        "tasks": [
-          {
-            "day": number,
-            "title": "string",
-            "description": "string"
-          }
-        ]
+You are a JSON API.
+
+Return ONLY valid JSON. No explanation, no markdown.
+
+STRICT FORMAT:
+{"tasks":[{"day":1,"title":"string","description":"string"}]}
+
+Rules:
+- Must be valid JSON
+- No trailing commas
+- No comments
+- No extra text outside JSON
+- Use double quotes only
+- Escape special characters
+
+Generate a 10-day learning path for becoming a ${role}.
+Each day must have 2-3 tasks.
+`;
+
+    const response = await groq.chat.completions.create({
+      model: "llama-3.1-8b-instant",
+      messages: [{ role: "user", content: prompt }],
+      response_format: { type: "json_object" }, 
+    });
+
+    const rawText = response.choices[0].message.content || "";
+
+    // ✅ Extract JSON
+    const jsonMatch = rawText.match(/\{(?:[^{}]|(?:\{[^{}]*\}))*\}/);
+
+    if (!jsonMatch) {
+      console.error("❌ No JSON found:", rawText);
+      throw new Error("AI did not return JSON");
+    }
+
+    let learningPath;
+
+    try {
+      learningPath = JSON.parse(jsonMatch[0]);
+    } catch (err) {
+      console.error("❌ First parse failed");
+
+      // ✅ Strong cleaner
+      let fixedText = jsonMatch[0];
+
+      // Remove newlines inside strings
+      fixedText = fixedText.replace(/\n/g, " ").replace(/\r/g, "");
+
+      // Remove trailing commas
+      fixedText = fixedText.replace(/,\s*}/g, "}").replace(/,\s*]/g, "]");
+
+      // Remove invalid control chars
+      fixedText = fixedText.replace(/[\u0000-\u001F]+/g, "");
+
+      try {
+        learningPath = JSON.parse(fixedText);
+      } catch (e) {
+        console.error("❌ Final parse failed:", fixedText);
+        throw new Error("Invalid AI response format");
       }
-      
-      Each day should have 2-3 tasks that build upon each other.
-      The tasks should be specific, actionable, and include resources or links when possible.
-      Focus on practical learning and hands-on projects.
-    `;
+    }
 
-    const result = await model.generateContent(prompt);
-    const text = result.response.candidates[0].content.parts[0].text || "";
-    const cleanedText = text.replace(/```(?:json)?\n?/g, "").trim();
-    const learningPath = JSON.parse(cleanedText);
+    if (!learningPath?.tasks || !Array.isArray(learningPath.tasks)) {
+      throw new Error("Invalid AI structure");
+    }
 
-    debugDB("Generated learning path", learningPath);
-
-    // Create role mentor and tasks
     const roleMentor = await db.roleMentor.create({
       data: {
         userId: dbUser.id,
         role,
         tasks: {
-          create: learningPath.tasks.map(task => ({
-            title: task.title,
-            description: task.description,
-            day: task.day
-          }))
-        }
-      }
+          create: learningPath.tasks.map((task) => ({
+            title: task.title || "",
+            description: task.description || "",
+            day: task.day || 1,
+          })),
+        },
+      },
     });
 
-    debugDB("Created role mentor", roleMentor);
     return roleMentor;
   } catch (error) {
     console.error("Error in createRoleMentor:", error);
-    debugDB("Error details", {
-      message: error.message,
-      stack: error.stack,
-      code: error.code
-    });
     throw new Error(error.message || "Failed to create role mentor");
   }
 }
@@ -95,13 +121,10 @@ export async function createRoleMentor(role) {
 export async function getRoleMentor() {
   try {
     const user = await currentUser();
-    if (!user) {
-      throw new Error("User not authenticated");
-    }
+    if (!user) throw new Error("User not authenticated");
 
     debugDB("Current user", user);
 
-    // Debug Prisma instance
     if (process.env.NODE_ENV === "development") {
       console.log("Prisma DB instance:", !!db);
     }
@@ -112,9 +135,7 @@ export async function getRoleMentor() {
 
     debugDB("Found DB user", dbUser);
 
-    if (!dbUser) {
-      throw new Error("User not found in database");
-    }
+    if (!dbUser) throw new Error("User not found in database");
 
     const roleMentor = await db.roleMentor.findFirst({
       where: {
@@ -146,13 +167,10 @@ export async function getRoleMentor() {
 export async function completeTask(taskId) {
   try {
     const user = await currentUser();
-    if (!user) {
-      throw new Error("User not authenticated");
-    }
+    if (!user) throw new Error("User not authenticated");
 
     debugDB("Current user", user);
 
-    // Debug Prisma instance
     if (process.env.NODE_ENV === "development") {
       console.log("Prisma DB instance:", !!db);
     }
@@ -163,9 +181,7 @@ export async function completeTask(taskId) {
 
     debugDB("Found DB user", dbUser);
 
-    if (!dbUser) {
-      throw new Error("User not found in database");
-    }
+    if (!dbUser) throw new Error("User not found in database");
 
     const task = await db.roleTask.update({
       where: {
@@ -182,7 +198,6 @@ export async function completeTask(taskId) {
 
     debugDB("Updated task", task);
 
-    // Check if all tasks for the current day are completed
     const roleMentor = await db.roleMentor.findFirst({
       where: {
         userId: dbUser.id,
@@ -202,26 +217,18 @@ export async function completeTask(taskId) {
     const allTasksCompleted = roleMentor.tasks.every(t => t.isCompleted);
 
     if (allTasksCompleted) {
-      // Check if this was the last day
       const lastDay = Math.max(...roleMentor.tasks.map(t => t.day));
+
       if (task.day === lastDay) {
         await db.roleMentor.update({
-          where: {
-            id: roleMentor.id
-          },
-          data: {
-            status: "completed"
-          }
+          where: { id: roleMentor.id },
+          data: { status: "completed" }
         });
         debugDB("Marked role mentor as completed", roleMentor.id);
       } else {
         await db.roleMentor.update({
-          where: {
-            id: roleMentor.id
-          },
-          data: {
-            currentDay: roleMentor.currentDay + 1
-          }
+          where: { id: roleMentor.id },
+          data: { currentDay: roleMentor.currentDay + 1 }
         });
         debugDB("Updated role mentor day", roleMentor.currentDay + 1);
       }
@@ -242,28 +249,15 @@ export async function completeTask(taskId) {
 export async function resetRoleMentor() {
   try {
     const user = await currentUser();
-    if (!user) {
-      throw new Error("User not authenticated");
-    }
-
-    debugDB("Current user", user);
-
-    // Debug Prisma instance
-    if (process.env.NODE_ENV === "development") {
-      console.log("Prisma DB instance:", !!db);
-    }
+    if (!user) throw new Error("User not authenticated");
 
     const dbUser = await db.user.findUnique({
       where: { clerkUserId: user.id },
     });
 
-    debugDB("Found DB user", dbUser);
+    if (!dbUser) throw new Error("User not found in database");
 
-    if (!dbUser) {
-      throw new Error("User not found in database");
-    }
-
-    const result = await db.roleMentor.updateMany({
+    return await db.roleMentor.updateMany({
       where: {
         userId: dbUser.id,
         status: "active"
@@ -272,16 +266,8 @@ export async function resetRoleMentor() {
         status: "completed"
       }
     });
-
-    debugDB("Reset role mentor result", result);
-    return result;
   } catch (error) {
     console.error("Error in resetRoleMentor:", error);
-    debugDB("Error details", {
-      message: error.message,
-      stack: error.stack,
-      code: error.code
-    });
     throw new Error(error.message || "Failed to reset role mentor");
   }
 }
@@ -289,19 +275,15 @@ export async function resetRoleMentor() {
 export async function getCompletedRoleMentors() {
   try {
     const user = await currentUser();
-    if (!user) {
-      throw new Error("User not authenticated");
-    }
+    if (!user) throw new Error("User not authenticated");
 
     const dbUser = await db.user.findUnique({
       where: { clerkUserId: user.id },
     });
 
-    if (!dbUser) {
-      throw new Error("User not found in database");
-    }
+    if (!dbUser) throw new Error("User not found in database");
 
-    const completedMentors = await db.roleMentor.findMany({
+    return await db.roleMentor.findMany({
       where: {
         userId: dbUser.id,
         status: "completed"
@@ -313,8 +295,6 @@ export async function getCompletedRoleMentors() {
         updatedAt: 'desc'
       }
     });
-
-    return completedMentors;
   } catch (error) {
     console.error("Error in getCompletedRoleMentors:", error);
     throw new Error(error.message || "Failed to retrieve completed role mentors");
@@ -324,31 +304,25 @@ export async function getCompletedRoleMentors() {
 export async function deleteCompletedRoleMentor(roleMentorId) {
   try {
     const user = await currentUser();
-    if (!user) {
-      throw new Error("User not authenticated");
-    }
+    if (!user) throw new Error("User not authenticated");
 
     const dbUser = await db.user.findUnique({
       where: { clerkUserId: user.id },
     });
 
-    if (!dbUser) {
-      throw new Error("User not found in database");
-    }
+    if (!dbUser) throw new Error("User not found in database");
 
-    // First, delete all tasks associated with the role mentor
     await db.roleTask.deleteMany({
       where: {
         roleMentorId: roleMentorId
       }
     });
 
-    // Then delete the role mentor
     await db.roleMentor.delete({
       where: {
         id: roleMentorId,
         userId: dbUser.id,
-        status: "completed" // Only allow deletion of completed paths
+        status: "completed"
       }
     });
 
@@ -357,4 +331,4 @@ export async function deleteCompletedRoleMentor(roleMentorId) {
     console.error("Error in deleteCompletedRoleMentor:", error);
     throw new Error(error.message || "Failed to delete completed role mentor");
   }
-} 
+}

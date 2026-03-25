@@ -29,10 +29,10 @@ export default function ResumeBuilder({ initialContent }) {
     register,
     handleSubmit,
     watch,
-    formState: { errors },
+    formState: { errors },  
   } = useForm({
     resolver: zodResolver(resumeSchema),
-    defaultValues: {
+    defaultValues:initialContent?.data || {
       contactInfo: {},
       summary: "",
       skills: "",
@@ -124,13 +124,20 @@ export default function ResumeBuilder({ initialContent }) {
 
   const onSubmit = async (data) => {
     try {
+
+      console.log("FORM DATA:", data); // ✅ ADD THIS
+    console.log("MARKDOWN:", previewContent);
+
       const formattedContent = previewContent
         .replace(/\n/g, "\n") 
         .replace(/\n\s*\n/g, "\n\n") 
         .trim();
 
       console.log(previewContent, formattedContent);
-      await saveResumeFn(previewContent);
+      await saveResumeFn({
+  markdown: previewContent,
+  formData: data
+});
     } catch (error) {
       console.error("Save error:", error);
     }

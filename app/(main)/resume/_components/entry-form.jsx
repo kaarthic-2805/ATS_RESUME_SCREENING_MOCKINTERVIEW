@@ -51,7 +51,7 @@ export function EntryForm({ type, entries, onChange }) {
       endDate: data.current ? "" : formatDisplayDate(data.endDate),
     };
 
-    onChange([...entries, formattedEntry]);
+   onChange([...(entries || []), formattedEntry]);
 
     reset();
     setIsAdding(false);

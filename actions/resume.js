@@ -2,11 +2,12 @@
 
 import { db } from "@/lib/prisma";
 import { auth } from "@clerk/nextjs/server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import Groq from "groq-sdk";
 import { revalidatePath } from "next/cache";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+const groq = new Groq({
+  apiKey: process.env.GROQ_API_KEY,
+});
 
 export async function saveResume(content) {
   const { userId } = await auth();
@@ -19,17 +20,20 @@ export async function saveResume(content) {
   if (!user) throw new Error("User not found");
 
   try {
+    console.log("RECEIVED CONTENT:", content);
     const resume = await db.resume.upsert({
       where: {
         userId: user.id,
       },
       update: {
-        content,
-      },
-      create: {
-        userId: user.id,
-        content,
-      },
+  content: content.markdown,
+  data: content.formData // 👈 ADD THIS
+},
+create: {
+  userId: user.id,
+  content: content.markdown,
+  data: content.formData
+}
     });
 
     revalidatePath("/resume");
@@ -87,9 +91,17 @@ export async function improveWithAI({ current, type }) {
   `;
 
   try {
-    const result = await model.generateContent(prompt);
-    const response = result.response;
-    const improvedContent = response.text().trim();
+    const response = await groq.chat.completions.create({
+      model: "llama-3.1-8b-instant",
+      messages: [
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+    });
+
+    const improvedContent = response.choices[0].message.content.trim();
     return improvedContent;
   } catch (error) {
     console.error("Error improving content:", error);

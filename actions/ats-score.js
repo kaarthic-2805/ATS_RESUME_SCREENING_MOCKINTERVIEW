@@ -1,9 +1,10 @@
 "use server";
 
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import Groq from "groq-sdk";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+const groq = new Groq({
+  apiKey: process.env.GROQ_API_KEY,
+});
 
 export async function generateATSScore({ resume, jobDescription }) {
   if (!resume || !jobDescription) {
@@ -13,8 +14,9 @@ export async function generateATSScore({ resume, jobDescription }) {
   const prompt = `
     Analyze the given resume against the job description and provide an ATS score (0-100) indicating how well the resume matches the job requirements.
     
-    Resume (Base64 Encoded PDF): ${resume}
-    Job Description: ${jobDescription}
+    Resume (Truncated): ${resume.slice(0, 4000)}
+    Job Description: ${jobDescription.slice(0, 2000)}
+
 
     ONLY return the response in the following JSON format without any additional text:
     {
@@ -26,9 +28,22 @@ export async function generateATSScore({ resume, jobDescription }) {
   `;
 
   try {
-    const response = await model.generateContent(prompt);
-    const textResponse = response.response.candidates[0].content.parts[0].text;
-    const cleanedResponse = textResponse.replace(/```(?:json)?\n?/g, "").trim();
+    const response = await groq.chat.completions.create({
+      model: "llama-3.1-8b-instant",
+      messages: [
+        {
+          role: "user",
+          content: prompt,  
+        },
+      ],
+    });
+
+    const textResponse = response.choices[0].message.content;
+
+    const cleanedResponse = textResponse
+      .replace(/```(?:json)?\n?/g, "")
+      .trim();
+
     return JSON.parse(cleanedResponse);
   } catch (error) {
     console.error("Error generating ATS score:", error);

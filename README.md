@@ -4,14 +4,6 @@
 
 > Helping individuals navigate their career paths with clarity and confidence.
 
----
-
-## Working Demo 🎥
-
-https://drive.google.com/file/d/13PqasH5Dwv3eBTKtBlh8ZLluyfyWsCdf/view?usp=sharing
-
----
-
 
 ## 🚀 Features
 
@@ -74,16 +66,13 @@ ai-careercoach/
 └── README.md                # Project documentation
 ```
 
-## 🔒 License
-
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for more details.
 
 ## 📞 Contact
 
 For inquiries or support, please reach out:
-- 👨‍💼 **Name**: Stephen
-- 📧 **Email**: stephenthangaraj14@gmail.com
-- 🌐 **GitHub**: [StephenThangarajA](https://github.com/StephenThangarajA)
+- 👨‍💼 **Name**: Kaarthic I.R
+- 📧 **Email**: kaarthicir28@gmail.com
+- 🌐 **GitHub**: https://github.com/kaarthic-2805/ATS_RESUME_SCREENING_MOCKINTERVIEW
 
 ---
 
